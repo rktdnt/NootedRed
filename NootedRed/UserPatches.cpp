@@ -660,8 +660,8 @@ void UserPatches::patchSignaturePage(const void* const data, const UInt64 pageOf
     const bool isGLDriver    = (strstr(vnodeName, "AMDRadeonX5000GLDriver") != nullptr);
     const bool isVADriver    = (strstr(vnodeName, "AMDRadeonVADriver") != nullptr);
     const bool isAppleGVA    = (strstr(vnodeName, "AppleGVA") != nullptr);
-    const bool isSharedCache = (strstr(vnodeName, "dyld_shared_cache") != nullptr) ||
-                               (strstr(vnodeName, "dyld") != nullptr);
+    // Target strictly the dyld shared cache file, never the dynamic linker binary /usr/lib/dyld.
+    const bool isSharedCache = (strstr(vnodeName, "dyld_shared_cache") != nullptr);
     vnode_putname(vnodeName);
 
     VnodeKind vnodeKind = kVnodeNone;
