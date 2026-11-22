@@ -389,10 +389,22 @@ void VP9UserPatch::processPatcher(KernelPatcher& patcher)
         return;
     }
 
+    auto cleanupAllocatedState = [&]() {
+        if (cachedPlan != nullptr) {
+            IODelete(cachedPlan, UserVP9DecodeResolver::Plan, 1);
+            cachedPlan = nullptr;
+        }
+        if (stateLock != nullptr) {
+            IOLockFree(stateLock);
+            stateLock = nullptr;
+        }
+    };
+
     const auto* const profile = DeviceProfile::current();
     if (profile == nullptr || !profile->media.hasVCN0 || profile->media.vcnGeneration != DeviceProfile::kVcn2_2 ||
         NRed::singleton().hasExternalVideo()) {
         this->enabled = false;
+        cleanupAllocatedState();
         publishState(State::Off);
         return;
     }
@@ -404,6 +416,7 @@ void VP9UserPatch::processPatcher(KernelPatcher& patcher)
     if (queryRegion == nullptr || readUser == nullptr || writeUser == nullptr) {
         patcher.clearError();
         this->enabled = false;
+        cleanupAllocatedState();
         publishState(State::Failed);
         SYSLOG("VP9", "Missing kernel VM helpers for VP9 COW patcher; disabled");
         return;
@@ -416,6 +429,7 @@ void VP9UserPatch::processPatcher(KernelPatcher& patcher)
     if (!patcher.routeMultiple(KernelPatcher::KernelID, routes, arrsize(routes))) {
         patcher.clearError();
         this->enabled = false;
+        cleanupAllocatedState();
         publishState(State::Failed);
         SYSLOG("VP9", "Failed to route shared-region hooks for VP9; disabled");
         return;
