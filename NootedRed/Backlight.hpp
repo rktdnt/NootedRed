@@ -29,6 +29,11 @@
 #include <IOKit/graphics/IOGraphicsTypes.h>
 #include <PenguinWizardry/ObjectField.hpp>
 
+typedef void (*t_DceDriverSetBacklight)(void *panel_cntl, uint32_t backlight_level);
+extern t_DceDriverSetBacklight orgDceDriverSetBacklight;
+extern void *panelCntlPtr;
+void wrapDcePanelCntlHwInit(void *panel_cntl);
+
 class Backlight
 {
     using t_DceDriverSetBacklight       = void       (*)(void* panelCntl, UInt32 backlightPwm);

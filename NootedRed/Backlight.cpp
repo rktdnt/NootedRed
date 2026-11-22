@@ -45,6 +45,34 @@
 #include <mach/i386/vm_types.h>
 #include <pexpert/pexpert.h>
 
+t_DceDriverSetBacklight orgDceDriverSetBacklight = nullptr;
+void *panelCntlPtr = nullptr;
+static mach_vm_address_t orgDcePanelCntlHwInit = 0;
+
+void wrapDcePanelCntlHwInit(void *panel_cntl)
+{
+    panelCntlPtr = panel_cntl;
+    if (orgDcePanelCntlHwInit != 0) {
+        FunctionCast(wrapDcePanelCntlHwInit, orgDcePanelCntlHwInit)(panel_cntl);
+    }
+}
+
+static const UInt8 kDcePanelCntlHwInitPattern[]     = {0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55,
+                                                       0x41, 0x54, 0x53, 0x50, 0x49, 0x89, 0xFD, 0x4C, 0x8D, 0x45,
+                                                       0xD4, 0x41, 0xC7, 0x00, 0x00, 0x00, 0x00, 0x00};
+static const UInt8 kDcePanelCntlHwInitPattern1404[] = {0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x54,
+                                                       0x53, 0x48, 0x83, 0xEC, 0x10, 0x48, 0x89, 0xFB, 0x4C, 0x8D,
+                                                       0x45, 0xDC, 0x41, 0xC7, 0x00, 0x00, 0x00, 0x00, 0x00};
+
+static const UInt8 kDceDriverSetBacklightPattern[] = {
+    0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54, 0x53, 0x50, 0x41, 0x89, 0xF0,
+    0x40, 0x89, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x7F, 0x08, 0x40, 0x8B, 0x40, 0x28, 0x8B, 0x70, 0x10};
+static const UInt8 kDceDriverSetBacklightPatternMask[] = {
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0,
+    0xF0, 0xFF, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0xFF, 0xF0, 0xFF, 0xFF, 0xFF, 0xFF};
+
 static const UInt8 kLinkCreatePattern[]     = {0x55, 0x48, 0x89, 0xE5, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41, 0x54,
                                                0x53, 0x48, 0x81, 0xEC, 0x00, 0x03, 0x00, 0x00, 0x49, 0x89, 0xFD, 0x48,
                                                0x8B, 0x05, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x00, 0x48, 0x00, 0x00,
@@ -109,6 +137,34 @@ void Backlight::init()
 void Backlight::processKext(KernelPatcher& patcher, const size_t id, const mach_vm_address_t slide, const size_t size)
 {
     if (kextRadeonX6000Framebuffer.loadIndex == id) {
+        if (!NRed::singleton().getAttributes().isRenoir()) {
+            PenguinWizardry::PatternSolveRequest solveRequest{
+                "_dce_driver_set_backlight", orgDceDriverSetBacklight, kDceDriverSetBacklightPattern,
+                kDceDriverSetBacklightPatternMask};
+            if (!solveRequest.solve(patcher, id, slide, size)) {
+                patcher.clearError();
+                orgDceDriverSetBacklight = reinterpret_cast<t_DceDriverSetBacklight>(
+                    patcher.solveSymbol(id, "_dce_driver_set_backlight", slide, size));
+                patcher.clearError();
+            }
+
+            if (currentKernelVersion() >= MACOS_14_4) {
+                PenguinWizardry::PatternRouteRequest request{"_dce_panel_cntl_hw_init", wrapDcePanelCntlHwInit,
+                                                             orgDcePanelCntlHwInit,
+                                                             kDcePanelCntlHwInitPattern1404};
+                if (!request.route(patcher, id, slide, size)) {
+                    patcher.clearError();
+                }
+            }
+            else {
+                PenguinWizardry::PatternRouteRequest request{"_dce_panel_cntl_hw_init", wrapDcePanelCntlHwInit,
+                                                             orgDcePanelCntlHwInit, kDcePanelCntlHwInitPattern};
+                if (!request.route(patcher, id, slide, size)) {
+                    patcher.clearError();
+                }
+            }
+        }
+
         if (currentKernelVersion() >= MACOS_14_4) {
             PenguinWizardry::PatternSolveRequest solveRequest{
                 "_dc_link_set_backlight_level", this->orgDcLinkSetBacklightLevel, kDcLinkSetBacklightLevelPattern1404};
@@ -198,8 +254,14 @@ IOReturn Backlight::wrapSetAttributeForConnection(IOService* const framebuffer, 
         }
     }
     else {
-        const auto pwmValue = (percentage * 0xFFFF) / 100;
-        if (singleton().orgDcLinkSetBacklightLevel(singleton().embeddedPanelLink, pwmValue, 0)) {
+        uint32_t pwmValue = percentage >= 100 ? 0x1FF00 : ((percentage * 0xFF) / 100) << 8U;
+        if (orgDceDriverSetBacklight && panelCntlPtr) {
+            orgDceDriverSetBacklight(panelCntlPtr, pwmValue);
+            return kIOReturnSuccess;
+        }
+
+        const auto defPwmValue = (percentage * 0xFFFF) / 100;
+        if (singleton().orgDcLinkSetBacklightLevel(singleton().embeddedPanelLink, defPwmValue, 0)) {
             return kIOReturnSuccess;
         }
     }
