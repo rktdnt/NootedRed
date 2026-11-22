@@ -333,6 +333,7 @@ bool NRedAudio::configureAudio(const bool pulseDpSec)
             }
             iter->release();
         }
+        match->release();
     }
 
     if (!firstExtFb.valid) { return !haveExtConn; }
@@ -456,6 +457,7 @@ void NRedAudio::probeTopology()
             }
             iter->release();
         }
+        match->release();
     }
     nred.setProp32("NRedAudioFBCount", fbCount);
 
